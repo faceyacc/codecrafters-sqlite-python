@@ -1,2 +1,5 @@
 # Database files used for testing
 *.db
+poetry.lock
+pyproject.toml
+pyrightconfig.json
