@@ -19,6 +19,6 @@ if command == ".dbinfo":
         # Read first two bytes and convert to integer
         page_size = int.from_bytes(database_file.read(2), byteorder="big")
 
-        logger.debug(f"database page size: {page_size}")
+        print(f"database page size: {page_size}")
 else:
     logger.debug(f"Invalid command: {command}")
