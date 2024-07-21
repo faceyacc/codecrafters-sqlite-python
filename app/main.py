@@ -1,3 +1,4 @@
+from io import BufferedReader
 import sys
 import re
 
@@ -11,6 +12,16 @@ command = sys.argv[2]
 
 # Helper func to read int from bytes
 def read_int(database_file, size):
+    """
+    Reaturns an integer of an byte array given a database file and size
+
+    Args:
+        database_file (file): The database file to read from
+        size (int): The number of bytes to read from the file
+
+    Returns:
+        int: The integer value of the byte array
+    """
     return int.from_bytes(database_file.read(size), byteorder="big")
 
 
@@ -31,12 +42,17 @@ def get_table_names(database_file):
 
 
 # Helper function to print b-tree page header
-def print_table_amount(database_file):
 
-    # 1. Get page size from database file
-    # 2. Get number of cells on page
-    # 3. Calculate cell_pointers using right most pointer
+def print_table_amount(database_file: BufferedReader) -> int:
+    """
+    Returns the number of rows in a table
 
+    Args:
+        database_file (file): The database file to read from
+
+    Returns:
+        int: The number of rows in the table
+    """
 
     database_file.seek(16)
     page_size = read_int(database_file, 2)
@@ -45,15 +61,17 @@ def print_table_amount(database_file):
     number_of_cells = read_int(database_file, 2)
 
     database_file.seek(108)
+    right_most_pointer = read_int(database_file, 2)
 
-    # Get right most pointer
-    # right_most_pointer = read_int(database_file, 2)
-    cell_pointers = [read_int(database_file, 2) for _ in range(number_of_cells)]
+
+    cell_pointers = [right_most_pointer for _ in range(number_of_cells)]
     records = [parse_cell(cell_pointer, database_file) for cell_pointer in cell_pointers]
+
+
+
     table_info = {record[2]: record[3] for record in records if record[2] != "sqlite_sequence"}
 
-
-    table_page = table_info[table_name.encode('utf-8')]
+    table_page = table_info[table_name]
 
     database_file.seek(((table_page - 1) * page_size) + 3)
     table_cell_amount = read_int(database_file, 2)
@@ -61,19 +79,41 @@ def print_table_amount(database_file):
 
 
 def read_varint(database_file):
+    """
+    Reads a variable length integer from the database file
+    and returns it value.
+
+    Args:
+        database_file (file): The database file to read from
+
+    Returns:
+        int: The variable length integer
+    """
     val = 0
-    USE_NEXT_BYTE = 0x80
-    BITS_TO_USE = 0x7F
+    USE_NEXT_BYTE = 0x80 # Mask to check if the high-order bit is set.
+    BITS_TO_USE = 0x7F # Mask to extract the lower 7 bits of each byte.
 
     for _ in range(9):
         byte = read_int(database_file, 1)
         val = (val << 7) | (byte & BITS_TO_USE)
-        if byte & USE_NEXT_BYTE == 0:
+        if byte & USE_NEXT_BYTE == 0: # Check if the high-order bit is set
             break
     return val
 
 
+# Helper fucntion to do type and value encoding.
+# Takes in a cell pointer and encodes if it is a BLOB, TEXT or it's value '
 def parse_record(serial_type, database_file):
+    """
+    Encodes the value of a record based on the serial type and returns it.
+
+    Args:
+        serial_type (int): The serial type of the record
+        database_file (file): The database file to read from
+
+    Returns:
+        str: The encoded value of the record
+    """
     if serial_type == 0:
         return None
     elif serial_type == 1:
@@ -90,10 +130,10 @@ def parse_record(serial_type, database_file):
         return read_int(database_file, 8)
     elif serial_type == 7:
         return read_int(database_file, 8)
-    elif serial_type >= 12 and serial_type % 2 == 0:
+    elif serial_type >= 12 and serial_type % 2 == 0: # check if BLOB type
         data_len = (serial_type - 12) // 2
         return database_file.read(data_len).decode()
-    elif serial_type >= 13 and serial_type % 2 == 1:
+    elif serial_type >= 13 and serial_type % 2 == 1: # check if TEXT type
         data_len = (serial_type - 13) // 2
         return database_file.read(data_len)
     else:
@@ -101,8 +141,18 @@ def parse_record(serial_type, database_file):
         return None
 
 
+
 def parse_cell(cell_pointer, database_file):
-    # Go to right most pointer
+    """
+    Parses a B-Tree Leaf Cell from a SQLite database file
+
+    Args:
+        cell_pointer (int): The pointer to the start of the cell in the database file
+        database_file (file): The database file to read from
+
+    Returns:
+        List: A list of records in the cell
+    """
     database_file.seek(cell_pointer)
 
     payload_size = read_varint(database_file)
@@ -112,6 +162,7 @@ def parse_cell(cell_pointer, database_file):
     format_header_start = database_file.tell() # get current file position
 
     format_header_size = read_varint(database_file)
+    print(f'format_header_size: {format_header_size}')
 
     serial_types = []
 
@@ -155,13 +206,13 @@ elif command == ".dbinfo":
         print(f"database page size: {page_size}")
         print(f"number of tables: {number_of_tables}")
 
-# Check if command starts with "SELECT"
+# Handle SELECT queries
 elif command.lower().startswith("select"):
 
     query = command.lower().split()
 
     # Get table name from SELECT command
-    table_name = query[-1]
+    table_name = query[-1].encode('utf-8')
 
     with open(database_file_path, "rb") as database_file:
         table_amount = print_table_amount(database_file)
