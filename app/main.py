@@ -12,14 +12,39 @@ from sqlparse.tokens import CTE
 database_file_path = sys.argv[1]
 command = sys.argv[2]
 
+def text_map(string_values):
+    text_map = {}
+    # print(string_values)
+
+    for row in string_values:
+        # print(f'row: {row}')
+        for column_index in range(len(row)):
+            if column_index not in text_map:
+                text_map[column_index] = []
+            text_map[column_index].append(row[column_index])
+    return text_map
 
 
-# def get_column_names(table_name):
-#     column_names_regex = rb'\b(\w+)\s+text\b'
-#     column_names = re.findall(column_names_regex, user_create_command)
-#     column_names = [column_name.decode() for column_name in column_names]
-#     table_name = table_name.decode()
-#     print("\n".join(column_names))
+def get_columns(record):
+    column_names_regex = rb'(?:\d*[A-Za-z]+(?:[A-Za-z]+)+)'
+    column_names = re.findall(column_names_regex, record)
+    column_names = [column_name.decode() for column_name in column_names]
+
+    # Split names by Upper case letters as a delimiter.
+    names = [re.findall('[A-Z][a-z]*', name) for name in column_names]
+
+    print(text_map(names))
+
+
+def get_column_names(table_name):
+    """
+    Returns the column names of a table given a table name
+    """
+    columns = table_name[0][-1]
+    table_names_regex = rb'\b(\w+)\s+text\b'
+    columns = re.findall(table_names_regex, columns)
+    column_names = {column_name.decode() for column_name in columns}
+    print(column_names)
 
 # Helper func to read int from bytes
 def read_int(database_file, size):
@@ -255,21 +280,24 @@ elif command.lower().startswith("select"):
         # Read number of cells from page header
         database_file.seek(103)
         number_of_cells = read_int(database_file, 2)
-        print(f'number of cells: {number_of_cells}')
+        # print(f'number of cells: {number_of_cells}')
 
         # Read right most pointer from page header
         database_file.seek(108)
         right_most_pointer = read_int(database_file, 2)
-        print(f'right most pointer: {right_most_pointer}')
+        # print(f'right most pointer: {right_most_pointer}')
 
         cell_pointers = [right_most_pointer for _ in range(number_of_cells)]
 
-        print(f'cell pointers: {cell_pointers}')
+        # print(f'cell pointers: {cell_pointers}')
 
         # returns sqlite_master table
         records = [parse_cell(cell_pointer, database_file) for cell_pointer in cell_pointers]
 
-        print(f'records: {records}')
+        # create_command = records[0][-1]
+        get_column_names(records)
+
+
 
         """
         LEFT OFF: right now if i print records, it will print the records of the table. I need a way
@@ -280,31 +308,46 @@ elif command.lower().startswith("select"):
         table_info = {record[2]: record[3] for record in records if record[2] != "sqlite_sequence"}
 
         table_page = table_info[table_name]
-        print(f'table page: {table_page}')
+        # print(f'table page: {table_page}')
 
 
         # Go to page number of table
         database_file.seek(((table_page - 1) * page_size) + 3)
         table_cell_amount = read_int(database_file, 2)
 
-        print(f"table cell amount: {table_cell_amount}")
+        # print(f"table cell amount: {table_cell_amount}")
 
         # Go to tables right most pointer
         database_file.seek(((table_page - 1) * page_size) + 8)
         table_right_most_pointer = read_int(database_file, 2)
-        print(f'table right most pointer: {table_right_most_pointer}')
+        # print(f'table right most pointer: {table_right_most_pointer}')
 
-        table_cell_pointers = [table_right_most_pointer for _ in range(table_cell_amount)]
-        print(f'table cell pointers: {table_cell_pointers}')
+        # table_cell_pointers = [table_right_most_pointer for _ in range(table_cell_amount)]
+        # print(f'table cell pointers: {table_cell_pointers}')
 
-        table_records = [parse_cell(table_cell_pointers[0], database_file) for cell_pointer in table_cell_pointers]
-        print(f'table records: {table_records}')
+        # table_records = [parse_cell(table_right_most_pointer, database_file) for cell_pointer in table_cell_amount]
+        table_records = parse_cell(table_right_most_pointer, database_file)
+        # print(f'table records: {table_records}')
+
+        # clean the table records
+        cleaned_table_records = []
+        for record in table_records:
+            if record == None:
+                continue
+            if record == b'':
+                continue
+            cleaned_table_records.append(record)
+        cleaned_table_records = cleaned_table_records[-1]
+
+
+        get_columns(cleaned_table_records)
+
 
 
         # Get column name from SELECT command
         column_name = query[1].encode('utf-8')
-        print(f'column name: {column_name}')
-        print(f'table info: {table_info}')
+        # print(f'column name: {column_name}')
+        # print(f'table info: {table_info}')
 
 
         # Get column index from table_info
