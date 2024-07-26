@@ -1,3 +1,0 @@
-The database file:
-    - SQLite database file begins with the database header
-    - database page size is stored in the header, right after the magic string. It's a 2-byte, big-endian value
