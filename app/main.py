@@ -33,7 +33,8 @@ def get_columns(record):
     # Split names by Upper case letters as a delimiter.
     names = [re.findall('[A-Z][a-z]*', name) for name in column_names]
 
-    print(text_map(names))
+    columns = text_map(names)
+    return columns
 
 
 def get_column_names(table_name):
@@ -43,8 +44,8 @@ def get_column_names(table_name):
     columns = table_name[0][-1]
     table_names_regex = rb'\b(\w+)\s+text\b'
     columns = re.findall(table_names_regex, columns)
-    column_names = {column_name.decode() for column_name in columns}
-    print(column_names)
+    column_names = [column_name.decode() for column_name in columns]
+    return column_names
 
 # Helper func to read int from bytes
 def read_int(database_file, size):
@@ -295,16 +296,9 @@ elif command.lower().startswith("select"):
         records = [parse_cell(cell_pointer, database_file) for cell_pointer in cell_pointers]
 
         # create_command = records[0][-1]
-        get_column_names(records)
 
 
 
-        """
-        LEFT OFF: right now if i print records, it will print the records of the table. I need a way
-        to only print the records of the column that is being selected. Or atleast find a way to print blob
-        data to debug further. I suspect that the blob data being printed is the acutal data of the
-        column or entire table. (look at research form perplexity...)
-        """
         table_info = {record[2]: record[3] for record in records if record[2] != "sqlite_sequence"}
 
         table_page = table_info[table_name]
@@ -340,14 +334,28 @@ elif command.lower().startswith("select"):
         cleaned_table_records = cleaned_table_records[-1]
 
 
-        get_columns(cleaned_table_records)
+        # print(f'columns: {get_column_names(records)}')
+        # print(f'values: {get_columns(cleaned_table_records)}')
+        column_names = get_column_names(records)
+        column_values = get_columns(cleaned_table_records)
+        table = {}
+        for i in range(len(column_names)):
+            table[column_names[i]] = column_values[i]
+        # print(f'table: {table}')
+
+
+
+
 
 
 
         # Get column name from SELECT command
-        column_name = query[1].encode('utf-8')
+        column_name = query[1]
         # print(f'column name: {column_name}')
-        # print(f'table info: {table_info}')
+
+        if column_name in table:
+            print('\n'.join(table[column_name]))
+            # print(f'{column_name}: {table[column_name]}')
 
 
         # Get column index from table_info
@@ -361,10 +369,6 @@ elif command.lower().startswith("select"):
         # Parse the cell and get the records
         # table_records = parse_cell(table_cell_pointer, database_file)
         # print(f'records: {table_records}')
-
-
-
-
 
 
 
