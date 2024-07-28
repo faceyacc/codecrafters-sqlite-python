@@ -12,20 +12,108 @@ from sqlparse.tokens import CTE
 database_file_path = sys.argv[1]
 command = sys.argv[2]
 
+def get_records(database_schema, database_file, page_size):
+    """
+    Returns a raw table records from the sqlite_master table.
+    Args:
+        database_schema (list): The sqlite_master table
+        database_file (file): The database file to read from
+        page_size (int): The size of the page in the database file
+    Returns:
+        bytes: The raw table records
+    """
+    table_info = {record[2]: record[3] for record in database_schema if record[2] != "sqlite_sequence"}
+
+
+    # Get table page number
+    table_page = table_info[table_name]
+
+    # Go to page number of table
+    database_file.seek(((table_page - 1) * page_size) + 3) # Offset 3 bytes from the start of the page to go to get number of cells on the page
+    table_cell_amount = read_int(database_file, 2)
+
+    # Go to tables right most pointer
+    database_file.seek(((table_page - 1) * page_size) + 8) # Offset 8 bytes from the start of the page to get the right most pointer
+
+    table_right_most_pointer = read_int(database_file, 2)
+
+    # Get raw table records
+    table_records = parse_cell(table_right_most_pointer, database_file)
+
+    return table_records
+
+def get_table(table_record, database_schema):
+    """
+    Returns a dictionary representation of a table given a table record and database schema
+
+    Args:
+        table_record (bytes): The raw table records
+        database_schema (list): The sqlite_master table
+
+    Returns:
+        dict: A dictionary representation of the table
+    """
+    # clean the table records of None and empty bytes
+    cleaned_table_records = []
+    for record in table_records:
+        if record == None:
+            continue
+        if record == b'':
+            continue
+        cleaned_table_records.append(record)
+    cleaned_table_records = cleaned_table_records[-1]
+
+
+    # Create dictionary representation of table
+    column_names = get_column_names(database_schema)
+    column_values = get_columns(cleaned_table_records)
+    table = {}
+    try:
+        if len(column_names) != len(column_values):
+            raise ValueError("Length of column names and column values do not match.")
+        for i in range(len(column_names)):
+            table[column_names[i]] = column_values[i]
+            return table
+    except IndexError as e:
+        print(f"IndexError: {e}. Please ensure column names and column values have matching lengths.")
+    except KeyError as e:
+        print(f"KeyError: {e}. An invalid key was encountered.")
+    except ValueError as e:
+        print(f"ValueError: {e}")
+    except Exception as e:
+        # Catch any other exceptions that are not explicitly handled
+        print(f"An unexpected error occurred: {e}")
+
+
 def text_map(string_values):
+    """
+    Returns a dictionary representation of a table given a list of string values
+
+    Args:
+        string_values (list): A list of string values
+
+    Returns:
+        dict: A dictionary representation of the table
+    """
     text_map = {}
-    # print(string_values)
 
     for row in string_values:
-        # print(f'row: {row}')
         for column_index in range(len(row)):
             if column_index not in text_map:
                 text_map[column_index] = []
             text_map[column_index].append(row[column_index])
     return text_map
 
-
 def get_columns(record):
+    """
+    Returns the columns of a table given a record
+
+    Args:
+        record (bytes): The raw table records
+
+    Returns:
+        dict: A dictionary representation of the columns
+    """
     column_names_regex = rb'(?:\d*[A-Za-z]+(?:[A-Za-z]+)+)'
     column_names = re.findall(column_names_regex, record)
     column_names = [column_name.decode() for column_name in column_names]
@@ -35,7 +123,6 @@ def get_columns(record):
 
     columns = text_map(names)
     return columns
-
 
 def get_column_names(table_name):
     """
@@ -47,7 +134,6 @@ def get_column_names(table_name):
     column_names = [column_name.decode() for column_name in columns]
     return column_names
 
-# Helper func to read int from bytes
 def read_int(database_file, size):
     """
     Reaturns an integer of an byte array given a database file and size
@@ -62,8 +148,16 @@ def read_int(database_file, size):
     return int.from_bytes(database_file.read(size), byteorder="big")
 
 
-# Helper function to get list of table names from database file
 def get_table_names(database_file):
+    """
+    Returns a list of table names in the database file
+
+    Args:
+        database_file (file): The database file to read from
+
+    Returns:
+        str: A string of table names separated by a space
+    """
     # Define pattern to match b'CREATE TABLE' statements using regex
     pattern = rb'CREATE TABLE (\w+)'
 
@@ -77,8 +171,6 @@ def get_table_names(database_file):
 
     return tables
 
-
-# Helper function to print b-tree page header
 
 def print_table_amount(database_file: BufferedReader) -> int:
     """
@@ -137,8 +229,7 @@ def read_varint(database_file):
     return val
 
 
-# Helper fucntion to do type and value encoding.
-# Takes in a cell pointer and encodes if it is a BLOB, TEXT or it's value '
+
 def parse_record(serial_type, database_file):
     """
     Encodes the value of a record based on the serial type and returns it.
@@ -168,13 +259,12 @@ def parse_record(serial_type, database_file):
         return read_int(database_file, 8)
     elif serial_type >= 12 and serial_type % 2 == 0: # check if BLOB type
         data_len = (serial_type - 12) // 2
-        # return database_file.read(data_len).decode()
         return database_file.read(data_len)
     elif serial_type >= 13 and serial_type % 2 == 1: # check if TEXT type
         data_len = (serial_type - 13) // 2
         return database_file.read(data_len)
     else:
-        print(f"Unknown serial type: {serial_type}")
+        print(f"Unknown serial type: {serial_type}") # TODO: add some error handling here.
         return None
 
 
@@ -286,92 +376,24 @@ elif command.lower().startswith("select"):
         # Read right most pointer from page header
         database_file.seek(108)
         right_most_pointer = read_int(database_file, 2)
-        # print(f'right most pointer: {right_most_pointer}')
 
         cell_pointers = [right_most_pointer for _ in range(number_of_cells)]
 
-        # print(f'cell pointers: {cell_pointers}')
+        # returns sqlite_master (database_schema)
+        database_schema = [parse_cell(cell_pointer, database_file) for cell_pointer in cell_pointers]
 
-        # returns sqlite_master table
-        records = [parse_cell(cell_pointer, database_file) for cell_pointer in cell_pointers]
-
-        # create_command = records[0][-1]
-
-
-
-        table_info = {record[2]: record[3] for record in records if record[2] != "sqlite_sequence"}
-
-        table_page = table_info[table_name]
-        # print(f'table page: {table_page}')
-
-
-        # Go to page number of table
-        database_file.seek(((table_page - 1) * page_size) + 3)
-        table_cell_amount = read_int(database_file, 2)
-
-        # print(f"table cell amount: {table_cell_amount}")
-
-        # Go to tables right most pointer
-        database_file.seek(((table_page - 1) * page_size) + 8)
-        table_right_most_pointer = read_int(database_file, 2)
-        # print(f'table right most pointer: {table_right_most_pointer}')
-
-        # table_cell_pointers = [table_right_most_pointer for _ in range(table_cell_amount)]
-        # print(f'table cell pointers: {table_cell_pointers}')
-
-        # table_records = [parse_cell(table_right_most_pointer, database_file) for cell_pointer in table_cell_amount]
-        table_records = parse_cell(table_right_most_pointer, database_file)
-        # print(f'table records: {table_records}')
+        # Get table records
+        table_records = get_records(database_schema, database_file, page_size)
 
         # clean the table records
-        cleaned_table_records = []
-        for record in table_records:
-            if record == None:
-                continue
-            if record == b'':
-                continue
-            cleaned_table_records.append(record)
-        cleaned_table_records = cleaned_table_records[-1]
-
-
-        # print(f'columns: {get_column_names(records)}')
-        # print(f'values: {get_columns(cleaned_table_records)}')
-        column_names = get_column_names(records)
-        column_values = get_columns(cleaned_table_records)
-        table = {}
-        for i in range(len(column_names)):
-            table[column_names[i]] = column_values[i]
-        # print(f'table: {table}')
-
-
-
-
-
-
+        table = get_table(table_records, database_schema)
 
         # Get column name from SELECT command
         column_name = query[1]
-        # print(f'column name: {column_name}')
 
+        # Print out column values
         if column_name in table:
             print('\n'.join(table[column_name]))
-            # print(f'{column_name}: {table[column_name]}')
-
-
-        # Get column index from table_info
-        # column_index = table_info[column_name]
-        # print(f'column index: {column_index}')
-
-        # Get the cell pointer for the first cell in the table
-        # database_file.seek(((table_page - 1) * page_size) + 12)
-        # table_cell_pointer = read_int(database_file, 2)
-
-        # Parse the cell and get the records
-        # table_records = parse_cell(table_cell_pointer, database_file)
-        # print(f'records: {table_records}')
-
-
-
 
 
 else:
