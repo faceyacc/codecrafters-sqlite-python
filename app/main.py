@@ -4,7 +4,7 @@ import re
 import sqlparse
 
 from dataclasses import dataclass
-from typing import List
+from typing import Dict, List
 
 from sqlparse.tokens import CTE
 
@@ -42,7 +42,7 @@ def get_records(database_schema, database_file, page_size):
 
     return table_records
 
-def get_table(table_record, database_schema):
+def get_table(table_record, database_schema) -> Dict[str, str]:
     """
     Returns a dictionary representation of a table given a table record and database schema
 
@@ -51,7 +51,7 @@ def get_table(table_record, database_schema):
         database_schema (list): The sqlite_master table
 
     Returns:
-        dict: A dictionary representation of the table
+        dict[str, str]: A dictionary representation of the table
     """
     # clean the table records of None and empty bytes
     cleaned_table_records = []
@@ -67,13 +67,13 @@ def get_table(table_record, database_schema):
     # Create dictionary representation of table
     column_names = get_column_names(database_schema)
     column_values = get_columns(cleaned_table_records)
-    table = {}
+    table: Dict[str, str] = {}
     try:
         if len(column_names) != len(column_values):
             raise ValueError("Length of column names and column values do not match.")
         for i in range(len(column_names)):
             table[column_names[i]] = column_values[i]
-            return table
+            # return table
     except IndexError as e:
         print(f"IndexError: {e}. Please ensure column names and column values have matching lengths.")
     except KeyError as e:
@@ -81,8 +81,8 @@ def get_table(table_record, database_schema):
     except ValueError as e:
         print(f"ValueError: {e}")
     except Exception as e:
-        # Catch any other exceptions that are not explicitly handled
         print(f"An unexpected error occurred: {e}")
+    return table
 
 
 def text_map(string_values):
@@ -309,7 +309,7 @@ def parse_cell(cell_pointer, database_file):
 
 
 statement = sqlparse.split(command)[0].lower()
-table = statement.split()[-1]
+table_name = statement.split()[-1]
 
 
 
@@ -365,6 +365,7 @@ elif command.lower().startswith("select"):
 
     with open(database_file_path, "rb") as database_file:
 
+        # TODO 1: move this into a separate function and call it here.
         database_file.seek(16)
         page_size = read_int(database_file, 2)
 
@@ -381,6 +382,7 @@ elif command.lower().startswith("select"):
 
         # returns sqlite_master (database_schema)
         database_schema = [parse_cell(cell_pointer, database_file) for cell_pointer in cell_pointers]
+        # TODO 1: def get_database_schema(database_file)
 
         # Get table records
         table_records = get_records(database_schema, database_file, page_size)
@@ -394,6 +396,7 @@ elif command.lower().startswith("select"):
         # Print out column values
         if column_name in table:
             print('\n'.join(table[column_name]))
+
 
 
 else:
