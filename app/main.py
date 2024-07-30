@@ -8,9 +8,40 @@ from typing import Dict, List
 
 from sqlparse.tokens import CTE
 
+
 # Get commands from command line
 database_file_path = sys.argv[1]
 command = sys.argv[2]
+
+def get_database_schema(database_file):
+    """
+    Returns the database schema from the sqlite_master table
+
+    Args:
+        database_file (file): The database file to read from
+
+    Returns:
+        list: The database schema
+        page_size: The size of the page in the database file
+    """
+    database_file.seek(16)
+    page_size = read_int(database_file, 2)
+
+    # Read number of cells from page header
+    database_file.seek(103)
+    number_of_cells = read_int(database_file, 2)
+    # print(f'number of cells: {number_of_cells}')
+
+    # Read right most pointer from page header
+    database_file.seek(108)
+    right_most_pointer = read_int(database_file, 2)
+
+    cell_pointers = [right_most_pointer for _ in range(number_of_cells)]
+
+    # returns sqlite_master (database_schema)
+    database_schema = [parse_cell(cell_pointer, database_file) for cell_pointer in cell_pointers]
+
+    return database_schema, page_size
 
 def get_records(database_schema, database_file, page_size):
     """
@@ -63,7 +94,6 @@ def get_table(table_record, database_schema) -> Dict[str, str]:
         cleaned_table_records.append(record)
     cleaned_table_records = cleaned_table_records[-1]
 
-
     # Create dictionary representation of table
     column_names = get_column_names(database_schema)
     column_values = get_columns(cleaned_table_records)
@@ -73,7 +103,6 @@ def get_table(table_record, database_schema) -> Dict[str, str]:
             raise ValueError("Length of column names and column values do not match.")
         for i in range(len(column_names)):
             table[column_names[i]] = column_values[i]
-            # return table
     except IndexError as e:
         print(f"IndexError: {e}. Please ensure column names and column values have matching lengths.")
     except KeyError as e:
@@ -82,8 +111,8 @@ def get_table(table_record, database_schema) -> Dict[str, str]:
         print(f"ValueError: {e}")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-    return table
 
+    return table
 
 def text_map(string_values):
     """
@@ -363,39 +392,51 @@ elif command.lower().startswith("select"):
     # Get table name from SELECT command
     table_name = query[-1].encode('utf-8')
 
-    with open(database_file_path, "rb") as database_file:
 
-        # TODO 1: move this into a separate function and call it here.
-        database_file.seek(16)
-        page_size = read_int(database_file, 2)
+    # Handle reading data from multiple columns
+    # Example: SELECT column1, column2 FROM table
+    if len(query) > 4:
+        columns = query[1:-2]
 
-        # Read number of cells from page header
-        database_file.seek(103)
-        number_of_cells = read_int(database_file, 2)
-        # print(f'number of cells: {number_of_cells}')
+        columns = [column.rstrip(',') for column in columns] # Remove comma from columns
 
-        # Read right most pointer from page header
-        database_file.seek(108)
-        right_most_pointer = read_int(database_file, 2)
+        with open(database_file_path, "rb") as database_file:
+            database_schema, page_size = get_database_schema(database_file)
 
-        cell_pointers = [right_most_pointer for _ in range(number_of_cells)]
+            # Get table records
+            table_records = get_records(database_schema, database_file, page_size)
 
-        # returns sqlite_master (database_schema)
-        database_schema = [parse_cell(cell_pointer, database_file) for cell_pointer in cell_pointers]
-        # TODO 1: def get_database_schema(database_file)
+            # clean the table records
+            table = get_table(table_records, database_schema)
 
-        # Get table records
-        table_records = get_records(database_schema, database_file, page_size)
+            multi_column = []
+            for column in columns:
+                if column in table:
+                    multi_column.append((table[column]))
 
-        # clean the table records
-        table = get_table(table_records, database_schema)
+            for row in zip(*multi_column):
+                print('|'.join(value for value in row))
 
+
+    # Handle reading data from a single column
+    # Example: SELECT column FROM table
+    else:
         # Get column name from SELECT command
         column_name = query[1]
 
-        # Print out column values
-        if column_name in table:
-            print('\n'.join(table[column_name]))
+        with open(database_file_path, "rb") as database_file:
+
+            database_schema, page_size = get_database_schema(database_file)
+
+            # Get table records
+            table_records = get_records(database_schema, database_file, page_size)
+
+            # clean the table records
+            table = get_table(table_records, database_schema)
+
+            # Print out column values
+            if column_name in table:
+                print('\n'.join(table[column_name]))
 
 
 
