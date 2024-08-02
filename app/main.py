@@ -33,6 +33,7 @@ def where_filter(table, index, where_clause):
     for row in table:
         rows.append(row[index])
 
+    # Removes duplicates while perserving order
     seen = set()
     rows = [row for row in rows if not (row in seen or seen.add(row))]
 
