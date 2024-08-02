@@ -9,6 +9,40 @@ from typing import Dict, List
 from sqlparse.tokens import CTE
 
 
+def get_index(columns, index):
+    """
+    Returns the index of a table given a table and index
+
+    Args:
+        table (list): The columsn to search
+        index (int): The WHERE clause to search for
+
+    Returns:
+        str: The index of the WHERE clause
+    """
+    for column in columns:
+        if index in column:
+            return column.index(index)
+
+
+
+
+
+def where_filter(table, index, where_clause):
+    rows = []
+    for row in table:
+        rows.append(row[index])
+
+    seen = set()
+    rows = [row for row in rows if not (row in seen or seen.add(row))]
+
+
+    print('|'.join(rows))
+
+
+
+
+
 # Get commands from command line
 database_file_path = sys.argv[1]
 command = sys.argv[2]
@@ -384,59 +418,62 @@ elif command.lower().startswith("select") and 'count' in statement:
         table_amount = print_table_amount(database_file)
         print(table_amount)
 
-# Handle reading data from a single column
+# Handle reading data from columns
 # Example: SELECT column FROM table
 elif command.lower().startswith("select"):
     query = command.lower().split()
 
     # Get table name from SELECT command
-    table_name = query[-1].encode('utf-8')
+    table_name = query[query.index("from") + 1].encode('utf-8')
+
+    with open(database_file_path, "rb") as database_file:
+
+        database_schema, page_size = get_database_schema(database_file)
 
 
-    # Handle reading data from multiple columns
-    # Example: SELECT column1, column2 FROM table
-    if len(query) > 4:
-        columns = query[1:-2]
+        # Get table records
+        table_records = get_records(database_schema, database_file, page_size)
 
-        columns = [column.rstrip(',') for column in columns] # Remove comma from columns
+        # clean the table records
+        table = get_table(table_records, database_schema)
 
-        with open(database_file_path, "rb") as database_file:
-            database_schema, page_size = get_database_schema(database_file)
 
-            # Get table records
-            table_records = get_records(database_schema, database_file, page_size)
+        # Handle reading data from multiple columns
+        # Example: SELECT column1, column2, columnN FROM table
+        if len(query) > 4:
+            columns = query[1:-2]
 
-            # clean the table records
-            table = get_table(table_records, database_schema)
+            columns = [column.rstrip(',') for column in columns] # Remove comma from columns
 
             multi_column = []
             for column in columns:
                 if column in table:
                     multi_column.append((table[column]))
 
-            for row in zip(*multi_column):
-                print('|'.join(value for value in row))
+            # Handle reading data from multiple columns with a WHERE clause
+            # Example: SELECT column1, column2, columnN FROM table WHERE column = value
+            if 'where' in query:
+                where_clause = query[-1].strip("'").capitalize()
+                index = get_index(multi_column, where_clause)
+                where_filter(multi_column, index, where_clause)
+                # print(vlaues)
+
+            else:
+                for row in zip(*multi_column):
+                    print('|'.join(value for value in row))
 
 
-    # Handle reading data from a single column
-    # Example: SELECT column FROM table
-    else:
-        # Get column name from SELECT command
-        column_name = query[1]
+        # Handle reading data from a single column
+        # Example: SELECT column FROM table
+        else:
+            # Get column name from SELECT command
+            column_name = query[1]
 
-        with open(database_file_path, "rb") as database_file:
-
-            database_schema, page_size = get_database_schema(database_file)
-
-            # Get table records
-            table_records = get_records(database_schema, database_file, page_size)
-
-            # clean the table records
-            table = get_table(table_records, database_schema)
 
             # Print out column values
             if column_name in table:
                 print('\n'.join(table[column_name]))
+
 
 
 
