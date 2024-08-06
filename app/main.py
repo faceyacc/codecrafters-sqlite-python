@@ -25,20 +25,29 @@ def get_index(columns, index):
             return column.index(index)
 
 
-
-
-
 def where_filter(table, index, where_clause):
     rows = []
     for row in table:
         rows.append(row[index])
 
+    # print(rows)
+
     # Removes duplicates while perserving order
     seen = set()
+    # count = sum([1 for row in rows if row == where_clause])
+
+    # rows.remove(where_clause)
+
+    if where_clause in rows: # remove all duplicates of where_clause
+        rows.remove(where_clause)
+        # rows = [row for row in rows if row != where_clause]
+    # else:
+
     rows = [row for row in rows if not (row in seen or seen.add(row))]
+    # print(rows)
 
 
-    print('|'.join(rows))
+    return '|'.join(rows)
 
 
 
@@ -128,6 +137,7 @@ def get_table(table_record, database_schema) -> Dict[str, str]:
             continue
         cleaned_table_records.append(record)
     cleaned_table_records = cleaned_table_records[-1]
+    # print(cleaned_table_records)
 
     # Create dictionary representation of table
     column_names = get_column_names(database_schema)
@@ -135,7 +145,8 @@ def get_table(table_record, database_schema) -> Dict[str, str]:
     table: Dict[str, str] = {}
     try:
         if len(column_names) != len(column_values):
-            raise ValueError("Length of column names and column values do not match.")
+            print(f'Length of column names and column values do not match: {len(column_names)} != {len(column_values)}')
+            # raise ValueError("Length of column names and column values do not match.")
         for i in range(len(column_names)):
             table[column_names[i]] = column_values[i]
     except IndexError as e:
@@ -179,6 +190,11 @@ def get_columns(record):
         dict: A dictionary representation of the columns
     """
     column_names_regex = rb'(?:\d*[A-Za-z]+(?:[A-Za-z]+)+)'
+
+    if isinstance(record, int):
+        record = str(record).encode('utf-8')
+
+
     column_names = re.findall(column_names_regex, record)
     column_names = [column_name.decode() for column_name in column_names]
 
@@ -328,7 +344,7 @@ def parse_record(serial_type, database_file):
         data_len = (serial_type - 13) // 2
         return database_file.read(data_len)
     else:
-        print(f"Unknown serial type: {serial_type}") # TODO: add some error handling here.
+        # print(f"Unknown serial type: {serial_type}") # TODO: add some error handling here.
         return None
 
 
@@ -456,8 +472,8 @@ elif command.lower().startswith("select"):
             if 'where' in query:
                 where_clause = query[-1].strip("'").capitalize()
                 index = get_index(multi_column, where_clause)
-                where_filter(multi_column, index, where_clause)
-                # print(vlaues)
+                row_values = where_filter(multi_column, index, where_clause)
+                print(row_values)
 
             else:
                 for row in zip(*multi_column):
