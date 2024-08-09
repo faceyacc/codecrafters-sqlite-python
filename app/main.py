@@ -8,33 +8,51 @@ from typing import Dict, List
 from sqlparse.tokens import CTE
 
 from .record import read_int, read_varint, parse_cell, parse_record
-from .filter import get_index, where_filter
 from .utils import *
-
-
-
+from .parser import *
 
 # Get commands from command line
 database_file_path = sys.argv[1]
 command = sys.argv[2]
 
-
 statement = sqlparse.split(command)[0].lower()
 table_name = statement.split()[-1]
 
+ON_STG8 = False
+
+# Class to indicate the b-tree page type
+class PageType:
+    InteriorIndex = 0x02
+    InteriorTable = 0x05
+    LeafIndex = 0x0A
+    LeafTable = 0x0D
 
 
-if command == ".tables":
-    with open(database_file_path, "rb") as database_file:
+def travel_pages(pg_num, pgsz, db_file, tdesc, query_ref):
+    db_file.seek(pg_num)
+    page_type = read_int(db_file, 1)
+    db_file.seek(pg_num + 3)
+    cell_amt = read_int(db_file, 2)
+    db_file.seek(pg_num + (12 if page_type & 8 == 0 else 8))
+    cell_ptrs = [read_int(db_file, 2) for _ in range(cell_amt)]
+    if page_type == PageType.InteriorTable:
+        global ON_STG8
+        ON_STG8 = True
+        records = []
+        for c_ptr in cell_ptrs:
+            db_file.seek(pg_num + c_ptr)
+            page_num = read_int(db_file, 4)
+            key = read_varint(db_file)
+            records.extend(
+                travel_pages((page_num - 1) * pgsz, pgsz, db_file, tdesc, query_ref) # pyright: ignore
+            )
+        return records
+    elif page_type == PageType.LeafTable:
+        return get_recs(pg_num, cell_ptrs, db_file, tdesc, query_ref)
 
-        database_file.seek(16)  # Skip the first 16 bytes of the header
 
-        # Get list of names of tables in the database
-        names = get_table_names(database_file)
 
-        print(names)
-
-elif command == ".dbinfo":
+if command == ".dbinfo":
     with open(database_file_path, "rb") as database_file:
 
         print("Logs from your program will appear here!")
@@ -44,93 +62,55 @@ elif command == ".dbinfo":
         # Read first two bytes and convert to integer
         page_size: int = int.from_bytes(database_file.read(2), byteorder="big")
 
-        # Find number of rows in sqlite_shema table
-        number_of_tables: int = sum(line.count(b"CREATE TABLE") for line in database_file)
+        database_file.seek(103)
+        table_amount = int.from_bytes(database_file.read(2), byteorder="big")
+        print(f"database page size: {page_size}\nnumber of tables: {table_amount}")
 
 
-
-        print(f"database page size: {page_size}")
-        print(f"number of tables: {number_of_tables}")
-
-# Handle reading the number of rows in a table
-# Example: SELECT COUNT(*) FROM apples
-elif command.lower().startswith("select") and 'count' in statement:
-
-    query = command.lower().split()
-
-    # Get table name from SELECT command
-    table_name = query[-1].encode('utf-8')
-
+elif command == ".tables":
     with open(database_file_path, "rb") as database_file:
-        table_amount = print_table_amount(database_file, table_name)
-        print(table_amount)
+        database_file.seek(103)
+        cell_amount = read_int(database_file, 2)
+        database_file.seek(108)
+        cell_pointers = [read_int(database_file, 2) for _ in range(cell_amount)]
+        records = [parse_cell(cell_pointer, database_file)[0] for cell_pointer in cell_pointers]
+        table_names = [record[2] for record in records if record[2] != "sqlite_sequence"]
 
-# Handle reading data from columns
-# Example: SELECT column FROM table
+        print(*table_names)
+
 elif command.lower().startswith("select"):
-    query = command.lower().split()
 
-    # Get table name from SELECT command
-    table_name = query[query.index("from") + 1].encode('utf-8')
+    p_query = parse(command.lower())
 
     with open(database_file_path, "rb") as database_file:
 
-        database_schema, page_size = get_database_schema(database_file)
+        database_file.seek(16)
+        page_size = int.from_bytes(database_file.read(2), byteorder="big")
 
-        # print(f'schema: {database_schema}')
-
-        # Get table records
-        table_records = get_records(database_schema, database_file, page_size, table_name)
-
-        # print(f'table records: {table_records}')
-
-        # clean the table records
-        table = get_table(table_records, database_schema)
-
-        clean_large_table(table_records)
+        # Read number of cells from page header
+        database_file.seek(103)
+        cell_amount = read_int(database_file, 2)
 
 
+        # Read right most pointer from page header
+        database_file.seek(108)
+        cell_pointers = [read_int(database_file, 2) for _ in range(cell_amount)]
 
-        # Handle reading data from multiple columns
-        # Example: SELECT column1, column2, columnN FROM table
-        if len(query) > 4:
-            columns = query[1:-2]
+        table_info = get_table_info(cell_pointers, database_file, p_query.table)
+        page_offset = (table_info["rootpage"] - 1) * page_size # type: ignore
 
-            columns = [column.rstrip(',') for column in columns] # Remove comma from columns
+        records = travel_pages(page_offset, page_size, database_file, table_info["desc"], p_query) # type: ignore
 
-            multi_column = []
-            for column in columns:
-                if column in table:
-                    multi_column.append((table[column]))
-
-            # Handle reading data from multiple columns with a WHERE clause
-            # Example: SELECT column1, column2, columnN FROM table WHERE column = value
-            if 'where' in query:
-                where_clause = query[-1].strip("'").capitalize()
-                index = get_index(multi_column, where_clause)
-                row_values = where_filter(multi_column, index, where_clause)
-                print(row_values)
-
-            # Handle reading data from multiple columns
-            # Example: SELECT column1, column2, columnN FROM table
-            else:
-                for row in zip(*multi_column):
-                    print('|'.join(value for value in row))
-
-
-        # Handle reading data from a single column
-        # Example: SELECT column FROM table
+        if p_query.count_cols:
+            print(len(records)) # type: ignore
         else:
-            # Get column name from SELECT command
-            column_name = query[1]
+            column_idxs = []
+            for column in p_query.col_names:
+                column_idxs.append(table_info["desc"].col_names.index(column)) # type: ignore
+            results = [[r[col_idx] for col_idx in column_idxs] for r in records if r] # type: ignore
 
-
-            # Print out column values
-            if column_name in table:
-                print('\n'.join(table[column_name]))
-
-
-
+            for result in results:
+                print(*result, sep="|")
 
 else:
     print(f"Invalid command: {command}")
